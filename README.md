@@ -1,2 +1,2 @@
 # Misc-Scripts
-Linux Administration Scripts I have wrote
+Linux Administration Scripts I have written
