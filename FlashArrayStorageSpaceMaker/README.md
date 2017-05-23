@@ -34,4 +34,5 @@ Why? All these blocks of only zeroes will be stored as only one block of zeroes 
 
 4. If the available space is less than 1Gb or the use% is over 95%, skip
 
-5. If the available space is more than 1Gb, write zeroes to the file system for all but 1Gb of free space.
+5. If the available space is more than 1Gb, write -a file of- zeroes to the file system for all but 1Gb of free space (deletes file afterwards).
+

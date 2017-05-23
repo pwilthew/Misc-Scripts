@@ -2,8 +2,7 @@
 #
 # Author: Patricia Wilthew
 #
-# Description: Perl script to get an accurate amount of free space present on flash  
-# array storage for planning purposes 
+# Description: Perl script that writes zeros to unused blocks of memory in Linux. 
 #
 # Process:
 # 1. Checks the output of lsmod for the presence of vmw_pvscsi to determine if
@@ -11,8 +10,8 @@
 # 2. Gets all local file systems
 # 3. Gets available and use% space on each file system
 # 4. If the available space is less than 1Gb or the use% is over 95%, skip
-# 5. If the available space is more than 1Gb, write zeroes to the file system
-#     for all but 1Gb of free space.
+# 5. If the available space is more than 1Gb, write -a file of- zeroes to the file system
+#     for all but 1Gb of free space (deletes file afterwards).
 
 my $lsmod = `lsmod | grep pvscsi`;
 
