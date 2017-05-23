@@ -3,7 +3,7 @@ Linux file systems (ext, xfs) are not meant to use a CAS (Content-Aware Storage)
 
 While a CAS can effectively serve its main purpose, storage, it has inaccurate capacity (free/used) information because of the way they store blocks of memory and the way Linux distributions allocate files. 
 
-### A Content-Aware Storage (CAS) optimization works as follows
+### Content-Aware Storage (CAS) optimization works as follows
 > The technology identifies how a given file is structured and then selects from a library of more than 100 algorithms the one that is most effective for the targeted data set. Even if the file has never before been identified, and there is no content-specific compressor, the technology will infer information about the structure and nature of the contents to select the most effective data reduction algorithm.
 http://www.dell.com/learn/us/en/555/solutions/deduplication-content-aware
 
