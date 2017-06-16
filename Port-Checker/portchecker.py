@@ -3,6 +3,7 @@
 import socket
 import subprocess
 import re
+import syslog
 #
 # Update FILE_NAME with the name of the csv file containing every 
 # expected:
@@ -258,27 +259,34 @@ def main():
 		Protocol, LocalAddress, ProcessName, Port, Owner = \
 		Process[0], Process[1], Process[3], Process[4], Process[5]
 
+		CorrectPort, CorrectOwner, CorrectIP = False, False, False
+
 		if compare_port(Process):
-			print "Checked: " + ProcessName \
-				  + " | " + Protocol \
-				    + " " + Port,
+			CorrectPort = True
 
-			if compare_owner(Process):
-				print " | " + Owner,
-			else:
-				print " | " + Owner + " <-------- OWNER ALERT",
+		if compare_owner(Process):
+			CorrectOwner = True
 
-			if compare_ip(Process):
-				print " | " + LocalAddress
-			else:
-				print " | " + LocalAddress + " <-------- IP ADDRESS ALERT"
+		if compare_ip(Process):
+			CorrectIP = True
 
+		if not (CorrectPort and CorrectOwner and CorrectIP):
+			Message = "ALERT: "
+			ShouldLog = True
 		else:
-			print "ALERT: The process " + ProcessName \
-				     + " is using " + Protocol \
-				      + " in port " + Port \
-			   + " and it is owned by " + Owner
+			Message = ""
+			ShouldLog = False
 
+		Message += "Process " + ProcessName \
+		       + " is using " + Protocol \
+				+ " " + Port \
+		     + " with owner " + Owner \
+    + ", accepting connections from " + LocalAddress
+		
+		#print Message
+	
+		if ShouldLog:
+			syslog.syslog(syslog.LOG_ALERT, Message)
 
 if __name__ == "__main__":
 	main()
