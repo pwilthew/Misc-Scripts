@@ -1,5 +1,11 @@
 #!/usr/bin/python
-# pwilthew@miva.com
+"""
+Usage: portchecker.py
+
+The purpose of this script is to determine if there are any unexpected 
+running applications that have ports open for listening. Its goal is to
+detect if the machine has been compromised.
+"""
 import socket
 import subprocess
 import re
@@ -121,7 +127,6 @@ def format_list(List):
 		if len(Line)==6:
 			Line.remove(Line[4])	# Removes the word master, 
 						# i.e. "nginx: master"
-
 		if (Line[3])[-1]==":":
 			Line[3] = (Line[3])[:-1] # Removes the ":" from "nginx:"
 
@@ -239,7 +244,8 @@ def compare_ip(Process):
 
 def main():
 	"""Checks if all TCP/UDP processes are listening through the expected ports, 
-	are owned by the expected users, and are using the expected addresses.
+	are owned by the expected users, and are accepting connections from the 
+	expected IP addresses.
 	"""
 
 	Netstat = run_netstat()
