@@ -43,15 +43,15 @@ FileObject = open(FILE_NAME, "r")
 for Line in FileObject.readlines():
         ProcessName = Line.split(",")[2]
         Owner = Line.split(",")[3]
-        dic2 = {ProcessName: (Owner)}
+        Pair = {ProcessName: (Owner)}
 
         if proc_users_dic.has_key(ProcessName):
                 if (Owner not in proc_users_dic[ProcessName]):
-                        temp = proc_users_dic[ProcessName]
-                        temp = temp + (Owner)
-                        proc_users_dic[ProcessName] = temp
+                        Temp = proc_users_dic[ProcessName]
+                        Temp = Temp + (Owner)
+                        proc_users_dic[ProcessName] = Temp
         else:
-                proc_users_dic.update(dic2)
+                proc_users_dic.update(Pair)
 
 # The following block creates a dictionary of 
 # {ProcessName: [(Port,Protocol)]} 
@@ -64,13 +64,13 @@ for Line in FileObject.readlines():
 
         PortTuple = (Port,Protocol)
 
-        dic2 = {ProcessName: [PortTuple]}
+        Pair = {ProcessName: [PortTuple]}
 
         if proc_port_prot_dic.has_key(ProcessName):
 		if (PortTuple not in proc_port_prot_dic[ProcessName]):
                         proc_port_prot_dic[ProcessName].append(PortTuple)
         else:
-                proc_port_prot_dic.update(dic2)
+                proc_port_prot_dic.update(Pair)
 
 # The following block creates a dictionary of
 # {ProcessName: (Public,Localhost)}
@@ -78,19 +78,19 @@ FileObject = open(FILE_NAME, "r")
 
 for Line in FileObject.readlines():
 	ProcessName = Line.split(",")[2]
-	public = Line.split(",")[4]
-	localhost = Line.split(",")[5]
-	localhost = localhost.strip('\r\n')
+	Public = Line.split(",")[4]
+	Localhost = Line.split(",")[5]
+	Localhost = Localhost.strip('\r\n')
 
-	public_local = (public,localhost)
+	PublicLocal = (Public,Localhost)
 	
-	dic2 = {ProcessName: [public_local]}
+	Pair = {ProcessName: [PublicLocal]}
 
 	if proc_ip_dic.has_key(ProcessName):
-		if public_local not in proc_ip_dic[ProcessName]:
-			proc_ip_dic[ProcessName].append(public_local)
+		if PublicLocal not in proc_ip_dic[ProcessName]:
+			proc_ip_dic[ProcessName].append(PublicLocal)
 	else:
-		proc_ip_dic.update(dic2)
+		proc_ip_dic.update(Pair)
 
 FileObject.close()
 
