@@ -1,6 +1,6 @@
 #!/usr/bin/python
 """
-Usage: ./portchecker.py
+Usage: sudo ./portchecker.py
 
 The purpose of this script is to determine if there are any unexpected 
 running applications that have ports open for listening. Its goal is to
