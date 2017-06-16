@@ -5,7 +5,13 @@ import subprocess
 import re
 #
 # Update FILE_NAME with the name of the csv file containing every 
-# expected Process name, Port, Protocol, and Owner.
+# expected:
+# ProcessName, 
+# Port, 
+# Protocol,
+# Owner, 
+# ShouldListenToPublicIPs=y/n, 
+# ShouldListenToLocalHost=y/n.
 #
 # Each Line of this file should have the following format: 
 #
@@ -83,23 +89,26 @@ FileObject.close()
 
 
 def run_netstat():
-	'''Returns the output of "netstat -plunt"'''
+	"""Returns the output of 'netstat -plunt'.
+	"""
 
 	return subprocess.Popen(['netstat', '-plunt'], \
 	       stdout=subprocess.PIPE).communicate()[0]
 
 
 def into_list_of_lists(StringInput):
-	'''Receives a multiLine string and returns a list of lines excluding
-	 the first two'''
+	"""Receives a multiLine string and returns a list of lines excluding
+	the first two.
+	"""
 
 	return [re.split("\s+", Line) for Line in StringInput.splitlines()[2:]]
 
 
 def format_list(List):
-	'''Receives a list of lines, each corresponding to a line of 
+	"""Receives a list of lines, each corresponding to a line of 
 	"netstat -plunt" output and returns a list of processes (where each 
-	process is a list)'''
+	process is a list).
+	"""
 
 	for Line in List:
 		Line.remove(Line[1])
@@ -137,8 +146,9 @@ def format_list(List):
 
 
 def compare_port(Process):
-	'''Returns true if the process is using a Port/Protocol
-	specified in the proc_port_prot_dic dictionary'''
+	"""Returns true if the process is using a Port/Protocol
+	specified in the proc_port_prot_dic dictionary.
+	"""
 
 	ProcessName = Process[3]
 	Port = Process[4]
@@ -154,8 +164,8 @@ def compare_port(Process):
 		return True
 
 	# Cases when a port is not predictable but it is specified as 
-	# "highport" in FileObject. Example: highport,UDP,rsyslogd,root,y,y
-	if len(Port)>4:
+	# "highport" in FILE_NAME. Example: highport,UDP,rsyslogd,root,y,y
+	if len(Port)>=4:
 		PortTuple = ("highport",Protocol)
 		if PortTuple in TuplesList:
 			return True
@@ -164,8 +174,9 @@ def compare_port(Process):
 
 
 def compare_owner(Process):
-	'''Returns true if the process is owned by the user specified in the 
-	proc_users_dic dictionary'''
+	"""Returns true if the process is owned by the user specified in the 
+	proc_users_dic dictionary.
+	"""
 
 	ProcessName = Process[3]
 	Owner = Process[5]
@@ -182,8 +193,9 @@ def compare_owner(Process):
 
 
 def add_owners(ProcessesList):
-	'''Receives a list of processes and appends the process owner to each
-	 of the lists'''
+	"""Receives a list of processes and appends the process owner to each
+	of the lists.
+	"""
 
 	for Process in ProcessesList:
 		ProcessName = Process[3]
@@ -199,23 +211,24 @@ def add_owners(ProcessesList):
 
 
 def compare_ip(Process):
-	'''Returns true if the process values of "Public?,Localhost?" are the
-	 same as the corresponding value of the process in proc_ip_dic'''
+	"""Returns true if the process values of "Public?,Localhost?" are the
+	same as the corresponding values for the process in proc_ip_dic.
+	"""
 
 	ProcessName = Process[3]
 	LocalAddress = Process[1]
+
+	PublicIPsListening = "y"	
+	LocalhostListening = "n"
 	
-	l = "y" #localhost?
-	p = "y" #public?
-
-	if LocalAddress != "127.0.0.1" and LocalAddress != "::1:" and \
-	   LocalAddress != "0.0.0.0" and LocalAddress != ":::":
-		l = "n"
-
 	if LocalAddress == "127.0.0.1" or LocalAddress == "::1:":
-		p = "n"
+		PublicIPsListening = "n"
 
-	PublicLocalTuple = (p, l)
+	if LocalAddress == "127.0.0.1" or LocalAddress == "::1:" or \
+	   LocalAddress == "0.0.0.0" or LocalAddress == ":::":
+		LocalhostListening = "y"
+
+	PublicLocalTuple = (PublicIPsListening, LocalhostListening)
 
 	if PublicLocalTuple in proc_ip_dic[ProcessName]:
 		return True
@@ -224,8 +237,9 @@ def compare_ip(Process):
 
 
 def main():
-	'''Checks if all TCP/UDP processes are listening through the expected ports, 
-	are owned by the expected users, and are using the expected addresses'''
+	"""Checks if all TCP/UDP processes are listening through the expected ports, 
+	are owned by the expected users, and are using the expected addresses.
+	"""
 
 	Netstat = run_netstat()
 
