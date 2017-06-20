@@ -11,12 +11,9 @@ import syslog
 #
 # Update FILE_NAME with the name of the csv file containing every 
 # expected:
-# Process Name, 
-# Port, 
-# Protocol,
-# Owner, 
-# Should Listen To Public IPs = y/n, 
-# Should Listen To Localhost = y/n.
+#
+# Process Name, Port, Protocol, Owner, Should listen to public IPs = y/n, 
+# Should listen to localhost = y/n.
 #
 # Each line of this file should have the following format: 
 #
@@ -109,24 +106,32 @@ def format_list(input_list):
     list_ = input_list
 
     for ln in list_:
-        ln.remove(ln[1])
-        ln.remove(ln[1])
+        
+        if '-' in ln:
+            print "You have to be root to execute this script."
+            exit()
 
-        if len(ln)>5:
-            ln.remove(ln[3]) # Removes the word LISTEN
+        while '0' in ln:
+            ln.remove('0') # Removes Recv-Q and Send-Q
 
-        if len(ln)==6:
-            ln.remove(ln[4])    # Removes the word master, 
-                        # i.e. "nginx: master"
+        if 'LISTEN' in ln:
+            ln.remove('LISTEN')
+
+        if '' in ln:
+            ln.remove('')
+
+        if len(ln)==5:
+            ln.remove(ln[4])     # Removes the word master, 
+                                 # i.e. "nginx: master"
+
         if (ln[3])[-1]==":":
             ln[3] = (ln[3])[:-1] # Removes the ":" from "nginx:"
-
-        del ln[4]  # Removes an empty string from the list
 
         ipv4 = ln[1].count(':')==1  # Checks if address is ipv4 or v6
 
         # Adds port number at the end of the list and removes it from the local
         # address for both ipv4 and ipv6 cases
+
         if ipv4:
             ln.append(ln[1].split(":")[1]) 
             ln[1] = ln[1].split(":")[0]
@@ -210,6 +215,9 @@ def compare_ip(process):
     process_name = process[3]
     local_address = process[1]
 
+    if process_name not in proc_ip_dic:
+        return False
+
     public_ips_listening = "y"    
     localhost_listening = "n"
     
@@ -272,6 +280,8 @@ def main():
              + " with owner " + owner \
         + ", listening from " + local_address
     
+        print message
+        
         if should_log:
             syslog.syslog(syslog.LOG_ALERT, message)
 
