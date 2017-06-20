@@ -34,7 +34,7 @@ proc_port_prot_dic = {}
 proc_ip_dic = {}
 
 # The following block creates a dictionary of 
-# {process_name: owner} 
+# {process_name: (owners)}, i.e.: nginx: ('nginx', 'root')
 file_object = open(FILE_NAME, "r")
 
 for ln in file_object.readlines():
@@ -242,7 +242,7 @@ def main():
     # position 5 to its owner
 
     for process in processes_list:
-        protocol, local_address, _, process_name, port, owner = process[:5]
+        protocol, local_address, _, process_name, port, owner = process[:6]
 
         correct_port, correct_owner, correct_ip = False, False, False
 
@@ -266,7 +266,7 @@ def main():
                + " is using " + protocol \
                         + " " + port \
              + " with owner " + owner \
-             + ", accepting connections from " + local_address
++ ", accepting connections from " + local_address
     
         if should_log:
             syslog.syslog(syslog.LOG_ALERT, message)
