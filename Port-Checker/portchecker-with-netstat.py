@@ -34,12 +34,12 @@ proc_port_prot_dic = {}
 proc_ip_dic = {}
 
 # The following block creates a dictionary of 
-# {process_name: (owners)}, i.e.: nginx: ('nginx', 'root')
+# {process_name: (owners)}
+# i.e.: 'nginx': ('nginx', 'root')
 file_object = open(FILE_NAME, "r")
 
 for ln in file_object.readlines():
-    process_name = ln.split(",")[2]
-    owner = ln.split(",")[3]
+    _, _, process_name, owner = ln.split(",")[:4]
 
     pair = {process_name: (owner,)}
 
@@ -52,7 +52,8 @@ for ln in file_object.readlines():
             proc_users_dic.update(pair)
 
 # The following block creates a dictionary of 
-# {process_name: [(port,protocol)]} 
+# {process_name: [(port,protocol)]}
+# i.e.: 'nginx': [('80', 'TCP'), ('443', 'TCP')]
 file_object = open(FILE_NAME, "r")
 
 for ln in file_object.readlines():
@@ -69,12 +70,12 @@ for ln in file_object.readlines():
 
 # The following block creates a dictionary of
 # {process_name: (public,localhost)}
+# i.e.: 'named': [('y', 'y'), ('n', 'y')]
 file_object = open(FILE_NAME, "r")
 
 for ln in file_object.readlines():
-    process_name = ln.split(",")[2]
-    public = ln.split(",")[4]
-    localhost = ln.split(",")[5]
+    _, _, process_name, _, public, localhost = ln.split(",")[:6]
+
     localhost = localhost.strip('\r\n')
 
     public_local_tuple = (public,localhost)
@@ -141,6 +142,25 @@ def format_list(input_list):
     return list_
 
 
+def add_owners(input_list):
+    """Receives a list of processes and appends the process owner to each
+    of the lists."""
+    processes_list = input_list
+
+    for process in processes_list:
+        process_name = process[3]
+        pid = str(process_name.split("/")[0]) 
+        process[3] = (process_name.split("/"))[1] # Removes pid from user
+
+        arg = [pid]
+        ps = subprocess.Popen(['ps', '-up'] + arg,
+                              stdout=subprocess.PIPE).communicate()[0] 
+        owner = (ps.split("\n")[1]).split(" ")[0]
+        process.append(owner)
+
+    return processes_list
+
+
 def compare_port(process):
     """Returns True if the process is using a port/protocol
     specified in the proc_port_prot_dic dictionary."""
@@ -182,22 +202,6 @@ def compare_owner(process):
         return True
     
     return False
-
-
-def add_owners(processes_list):
-    """Receives a list of processes and appends the process owner to each
-    of the lists."""
-    for process in processes_list:
-        process_name = process[3]
-        pid = str(process_name.split("/")[0])
-        process[3] = (process_name.split("/"))[1] 
-        arg = [pid]
-        ps = subprocess.Popen(['ps', '-up'] + arg,
-                              stdout=subprocess.PIPE).communicate()[0] 
-        owner = (ps.split("\n")[1]).split(" ")[0]
-        process.append(owner)
-
-    return processes_list
 
 
 def compare_ip(process):
@@ -266,7 +270,7 @@ def main():
                + " is using " + protocol \
                         + " " + port \
              + " with owner " + owner \
-+ ", accepting connections from " + local_address
+        + ", listening from " + local_address
     
         if should_log:
             syslog.syslog(syslog.LOG_ALERT, message)
