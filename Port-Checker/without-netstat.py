@@ -149,17 +149,16 @@ def format_list(input_list):
         uid = sub_list[3]
         inode = sub_list[4]
 
-        # Just need to get:
-
-        sub_list[3] = "process-name"
+        # Note to self: just need to finish get_processname
+        sub_list[3] = get_processname()
         sub_list[4] = str(port)
-        sub_list[5] = "username"
+        sub_list[5] = get_username(uid)
 
         sub_list = sub_list[0:6] # Ignore rest of elements on position > 5
         list_.append(sub_list)
 
         # GOAL: ['TCP', '0.0.0.0', '0.0.0.0', 'mysqld', '3306', 'mysql']
-        # CURR: ['TCP', '0.0.0.0', '0.0.0.0', 'process-name', '3306', 'username']
+        # CURR: ['TCP', '0.0.0.0', '0.0.0.0', 'process-name', '80', 'root']
  
     return list_
 
@@ -173,6 +172,23 @@ def translate_ip(ip):
     else:
         return socket.inet_ntoa(struct.pack("<L", int(ip, 16)))
 
+
+def get_username(uid):
+    """ """
+    arg = ['cat', '/etc/passwd']
+
+    passwd = subprocess.Popen(arg, 
+                            stdout=subprocess.PIPE).communicate()[0]
+
+    for ln in passwd.splitlines():
+        ln_list = ln.split(":")
+        if uid in ln_list[2]:
+            return ln_list[0]
+    return "-"
+
+
+def get_processname():
+    return "process-name"
 
 def compare_port(process):
     """Returns True if the process is using a port/protocol
