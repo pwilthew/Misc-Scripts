@@ -10,6 +10,7 @@ import subprocess
 import re
 import syslog
 import base64
+import os
 #
 # Update FILE_NAME with the name of the csv file containing every 
 # expected:
@@ -26,6 +27,8 @@ import base64
 #   80,TCP,apache,root,y,y
 #
 FILE_NAME = "netports.csv"
+pids = filter(lambda x: x.isdigit() and os.path.isdir("/proc/"+x),
+              os.listdir("/proc/"))
 
 # The following dictionaries get their keys and values from FILE_NAME
 proc_users_dic = {}
@@ -128,6 +131,9 @@ def format_list(input_list):
         while '' in sub_list:
             sub_list.remove('')
 
+        if '06' in sub_list[4]:
+            continue
+
         sub_list.remove(sub_list[1]) # Removes sl (number of line)
         sub_list.remove(sub_list[4]) # Removes tx_queue:rx_queue
         sub_list.remove(sub_list[4]) # Removes tr:tm->when
@@ -149,17 +155,14 @@ def format_list(input_list):
         uid = sub_list[3]
         inode = sub_list[4]
 
-        # Note to self: just need to finish get_processname
-        sub_list[3] = get_processname()
+        sub_list[3] = get_processname(inode)
         sub_list[4] = str(port)
         sub_list[5] = get_username(uid)
 
         sub_list = sub_list[0:6] # Ignore rest of elements on position > 5
+
         list_.append(sub_list)
 
-        # GOAL: ['TCP', '0.0.0.0', '0.0.0.0', 'mysqld', '3306', 'mysql']
-        # CURR: ['TCP', '0.0.0.0', '0.0.0.0', 'process-name', '80', 'root']
- 
     return list_
 
 
@@ -167,7 +170,8 @@ def translate_ip(ip):
     """ """
     if len(ip) > 8:
         ip = base64.b16decode(ip)
-        return socket.inet_ntop(socket.AF_INET6, struct.pack('<4I', *struct.unpack('>4I', ip)))
+        return socket.inet_ntop(socket.AF_INET6, 
+                                struct.pack('<4I', *struct.unpack('>4I', ip)))
 
     else:
         return socket.inet_ntoa(struct.pack("<L", int(ip, 16)))
@@ -177,8 +181,7 @@ def get_username(uid):
     """ """
     arg = ['cat', '/etc/passwd']
 
-    passwd = subprocess.Popen(arg, 
-                            stdout=subprocess.PIPE).communicate()[0]
+    passwd = subprocess.Popen(arg, stdout=subprocess.PIPE).communicate()[0]
 
     for ln in passwd.splitlines():
         ln_list = ln.split(":")
@@ -187,8 +190,31 @@ def get_username(uid):
     return "-"
 
 
-def get_processname():
-    return "process-name"
+def get_processname(inode):
+    """" """
+    found = False
+
+    for pid in pids:
+        path = "/proc/" + pid + "/fd"
+        arg = ['ls', '-l', path]
+        file_descriptors = subprocess.Popen(arg, 
+                           stdout=subprocess.PIPE).communicate()[0]
+
+        # Check if a socket is using the inode
+        if 'socket:['+inode+']' in file_descriptors:
+            found = True
+            break # Stop, and use that pid for next statement
+
+    if found:
+        # Get process name from first line of /proc/<pid>/status
+        path = '/proc/' + pid + "/status"
+        arg = ['cat', path]
+        status = subprocess.Popen(arg, stdout=subprocess.PIPE).communicate()[0]
+        status = status.splitlines()
+        return (status[0].split("\t"))[-1]
+    else:
+        return "process-name"
+
 
 def compare_port(process):
     """Returns True if the process is using a port/protocol
@@ -262,25 +288,15 @@ def compare_ip(process):
 
 
 def main():
-    """Checks if all TCP/UDP processes are listening through the expected ports, 
-    are owned by the expected users, and are accepting connections from the 
-    expected IP addresses."""
+    """Checks if all TCP/UDP processes are listening through the 
+    expected ports, are owned by the expected users, and are 
+    accepting connections from the expected IP addresses."""
     sockets = get_sockets('tcp') \
             + get_sockets('tcp6') \
             + get_sockets('udp') \
             + get_sockets('udp6')
 
-    sockets = format_list(sockets)
-
-    for i in sockets: 
-        print i
-
-    # Creates a list of lists
-    # processes_list = into_list_of_lists(netstat)
-
-    # Removes extra info and adds owners to each process
-    '''
-    processes_list = format_list(processes_list)
+    processes_list = format_list(sockets)
 
     # At this point, a list within processes_list would look like:
     # ['TCP', '0.0.0.0', '0.0.0.0:*', 'mysqld', '3306', 'mysql']
@@ -318,8 +334,8 @@ def main():
         
         if should_log:
             syslog.syslog(syslog.LOG_ALERT, message)
-    '''
 
 if __name__ == "__main__":
     main()
+
 
