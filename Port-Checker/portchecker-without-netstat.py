@@ -104,7 +104,7 @@ def get_sockets(protocol):
     arg = ['/proc/net/' + protocol]
 
     output = subprocess.Popen(['cat'] + arg, 
-                            stdout=subprocess.PIPE).communicate()[0]
+                              stdout=subprocess.PIPE).communicate()[0]
 
     list_of_lines = output.splitlines()[1:]
 
@@ -202,8 +202,7 @@ def get_processname(inode):
         path = '/proc/' + pid + '/fd'
         arg = ['ls', '-l', path]
         file_descriptors = subprocess.Popen(arg, 
-                           stdout=subprocess.PIPE,
-                           stderr=None).communicate()[0]
+                           stdout=subprocess.PIPE).communicate()[0]
 
         # Check if a socket is using the inode
         if 'socket:['+inode+']' in file_descriptors:
@@ -298,7 +297,7 @@ def main():
     accepting connections from the expected IP addresses."""
     OK = True
 
-    print "Investigating..."
+    print 'Investigating...'
     
     sockets = get_sockets('tcp') \
             + get_sockets('tcp6') \
@@ -345,7 +344,7 @@ def main():
             OK = False
 
     if OK:
-        print "No suspicious connections found."
+        print 'No suspicious connections found.'
 
 if __name__ == '__main__':
     main()
