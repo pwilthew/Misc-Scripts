@@ -296,6 +296,10 @@ def main():
     """Checks if all TCP/UDP processes are listening through the 
     expected ports, are owned by the expected users, and are 
     accepting connections from the expected IP addresses."""
+    OK = True
+
+    print "Investigating..."
+    
     sockets = get_sockets('tcp') \
             + get_sockets('tcp6') \
             + get_sockets('udp') \
@@ -334,11 +338,14 @@ def main():
                         + ' ' + port \
              + ' with owner ' + owner \
         + ', listening from ' + local_address
-    
-        print message
         
         if should_log:
             syslog.syslog(syslog.LOG_ALERT, message)
+            print message
+            OK = False
+
+    if OK:
+        print "No suspicious connections found."
 
 if __name__ == '__main__':
     main()
