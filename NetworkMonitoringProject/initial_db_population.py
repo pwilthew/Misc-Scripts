@@ -2,17 +2,18 @@
 """Usage: ./initial_db_population.py
 
 The purpose of this script is to populate a database with
-information about the devices connected to specific switches."""
+information about the devices connected to a switch 
+stack Cisco 2960XR."""
 
 import MySQLdb
 import subprocess
     
 # OID RFC1213-MIB::atPhysAddress
 ARP_TABLE_OID = '.1.3.6.1.2.1.3.1.1.2'
-
+IF_DESCRIPTION_OID = '.1.3.6.1.2.1.2.2.1.2'
 
 # Open file with database credentials
-file_name = '/path/to/db/creds'
+file_name = '/../...'
 file_object = open(file_name,'r')
 creds = [(x.split(': '))[1] for x in (file_object.read()).splitlines()]
 
@@ -21,7 +22,7 @@ username, db_name, password = creds[0:3]
 
 # Open file with SNMP credentials and the database table name that will
 # store the devices connected to the switch 
-file_name = '/path/to/snmp/creds'
+file_name = '/../...'
 file_object = open(file_name,'r')
 creds = [(x.split(': '))[1] for x in (file_object.read()).splitlines()]
 
@@ -32,8 +33,7 @@ priv, priv_password, host, table_name = creds[0:9]
 
 def insert_macs_vlans_ips():
     """Inserts into database the physical address, vlan, and most recent ipv4 
-    address of device found through snmpwalk
-    """
+    address of device found through snmpwalk."""
     # Arguments to be used in snmpwalk
     arg = ['-v' + version, '-l' + security, '-u' + user, '-a' + auth_protocol,\
            '-A' + auth_password, '-x' + priv, '-X' + priv_password, host, ARP_TABLE_OID]
@@ -64,6 +64,20 @@ def insert_macs_vlans_ips():
             print 'Error in DB insertion'
             db.rollback()
 
+
+def insert_descriptions():
+    """Inserts into database the description of each device found through 
+    snmpwalk."""
+    # Arguments to be used in snmpwalk
+    arg = ['-v' + version, '-l' + security, '-u' + user, '-a' + auth_protocol,\
+           '-A' + auth_password, '-x' + priv, '-X' + priv_password, host, IF_DESCRIPTION]
+
+    if_descr = subprocess.Popen(['snmpwalk'] + arg, stdout=subprocess.PIPE).communicate()[0]
+    if_descr_list = table.splitlines()
+
+    for row in if_descr_list:
+        print row
+        #in construction    
 
 def main():
 
