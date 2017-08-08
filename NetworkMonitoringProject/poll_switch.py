@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python2
 """Usage: ./poll_switch.py
 
 The purpose of this script is to populate and/or update a
@@ -29,8 +29,8 @@ creds = [(x.split(': '))[1] for x in (file_object.read()).splitlines()]
 # Store them in variables
 username, db_name, password = creds[0:3]
 
-# Open file with SNMP credentials and the database table name that will
-# store the devices connected to the switch 
+# Open file with the switch SNMP credentials and the database table
+# name that will store the devices connected to the switch 
 file_name = '/snmp_switch.txt'
 file_object = open(file_name,'r')
 creds = [(x.split(': '))[1] for x in (file_object.read()).splitlines()]
@@ -38,6 +38,15 @@ creds = [(x.split(': '))[1] for x in (file_object.read()).splitlines()]
 # Store them in variables
 version, security, user, auth_protocol, auth_password,\
 priv, priv_password, host, table_name = creds[0:9]
+
+# Open file with the firewall's SNMP credentials 
+file_name = '/snmp_firewall.txt'
+file_object = open(file_name,'r')
+creds = [(x.split(': '))[1] for x in (file_object.read()).splitlines()]
+
+# Store them in variables
+fversion, fsecurity, fuser, fauth_protocol, fauth_password,\
+fpriv, fpriv_password, fhost = creds[0:8]
 
 # Open file with VLAN numbers and their use
 file_name = '/vlans_switch.txt'
@@ -213,7 +222,7 @@ def detect_suspicious_devices(index, mac, vlan, cursor):
     row_exists = cursor.execute(query)
 
     if not row_exists:
-        #Alert about new MAC
+        #Alert
         print "New MAC appeared on the network"
 
     else: # If the MAC existed, it might be on more than one VLAN now
@@ -234,7 +243,7 @@ def detect_suspicious_devices(index, mac, vlan, cursor):
                     allowed = True
 
         if not allowed:
-            #Alert about unallowed vlan
+            #Alert
             print "MAC appears on a VLAN that is not in its allowed VLANs list"
 
     # Second, determine if the MAC appears on a VLAN known to be for phones
@@ -243,8 +252,9 @@ def detect_suspicious_devices(index, mac, vlan, cursor):
         if "0:e1:6d:ba" not in mac and\
            "c8:0:84:aa" not in mac and\
            "2c:3e:cf:87" not in mac and\
-           "6c:fa:89:94" not in mac:
-            #Alert about MAC address on the phones' VLAN that does not map to Cisco
+           "6c:fa:89:94" not in mac and\
+           "54:4a:0:37" not in mac:
+            #Alert
             print "%s is on the phones' VLAN" % mac
 
     return
@@ -282,7 +292,6 @@ def update_ipv4_addresses():
                     SET MOST_RECENT_IPV4 = '%s'
                     WHERE mac = '%s'
                  """ % (table_name, ip, mac)
-
         try:
             cursor.execute(update)
             db.commit()
@@ -293,6 +302,12 @@ def update_ipv4_addresses():
 
     # Close database connection
     db.close()
+
+    # Get ARP entries of devices not routed by switch
+    query_firewall()
+
+    # Detect which MACs are not in the ARP entry and alert
+    detect_no_ARP_entry()
 
     return
 
@@ -325,6 +340,7 @@ def update_ipv6_addresses():
 
         update = """
                     UPDATE %s
+
                     SET MOST_RECENT_IPV6 = '%s'
                     WHERE mac = '%s'
                  """ % (table_name, ip, mac)
@@ -382,7 +398,6 @@ def update_descriptions():
                         SET description = '%s'
                         WHERE if_index = '%s'
                      """ % (table_name, descr, index)
-
         try:
             cursor.execute(update)
             db.commit()
@@ -550,6 +565,83 @@ def update_make_model():
 
     # Close database connection
     db.close()
+
+    return
+
+
+def detect_no_ARP_entry():
+    """Detects and triggers an alert if a device shows up in the MAC
+       table but not the ARP neighbor table; this would suggest
+       that a device on the network is not talking IPv4/6, which
+       should never be the case."""
+    
+    # Open database connection
+    db = MySQLdb.connect(user=username,db=db_name,passwd=password)
+
+    # Prepare a cursor object
+    cursor = db.cursor()
+
+    query = """
+               SELECT mac, most_recent_ipv4, vlan FROM %s
+            """ % (table_name)
+
+    cursor.execute(query)
+
+    for results in cursor:
+        lst = list(results)
+        
+        mac = lst[0]
+        ip = lst[1]
+        vlan = lst[2]
+
+        if ip == None and mac != '0:11:32:1b:65:14' and mac != '8:5b:e:5d:cf:d4':
+            #Alert
+            print "The MAC %s is not in the ARP neighbor table" % mac
+ 
+    return
+
+
+def query_firewall():
+    """Get the ARP entries for the MAC addresses that are routed
+    by the firewall. Because some of the switch devices are being 
+    routed by the firewall instead of the switch, their ARP entries
+    are empty from the perspective of the switch. """
+
+    # Arguments to be used in snmpwalk
+    arg = ['-v' + fversion, '-l' + fsecurity, '-u' + fuser,\
+           '-a' + fauth_protocol, '-A' + fauth_password,\
+           '-x' + fpriv, '-X' + fpriv_password, fhost,\
+           'ipNetToMediaPhysAddress']
+
+    ip_mac = subprocess.Popen(['snmpwalk'] + arg,\
+                                stdout=subprocess.PIPE).communicate()[0]
+
+    ip_mac_list = ip_mac.splitlines()
+
+    # Open database connection
+    db = MySQLdb.connect(user=username,db=db_name,passwd=password)
+
+    # Prepare a cursor object
+    cursor = db.cursor()
+ 
+    for ln in ip_mac_list:
+        left, mac = ln.split(' = STRING: ')[0:2]
+        dot = '.'
+        ip = dot.join(left.split('.')[2:6])
+
+        update = """
+                    UPDATE %s
+                    SET MOST_RECENT_IPV4 = '%s'
+                    WHERE mac = '%s'
+                 """ % (table_name, ip, mac)
+
+        try:
+            cursor.execute(update)
+            db.commit()
+
+        except:
+            print 'Error in DB update: ', cursor._last_executed
+            db.rollback()
 
     return
 
