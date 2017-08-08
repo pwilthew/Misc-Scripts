@@ -106,7 +106,6 @@ def retrieve_indexes_macs():
 
         mac_baseport_list = output.splitlines()
 
-
         # Arguments to be used in snmpwalk
         arg = ['-m' + 'BRIDGE-MIB' , '-n' + 'vlan-' + vlan,\
                '-v' + version, '-l' + security, '-u' + user,\
@@ -340,7 +339,6 @@ def update_ipv6_addresses():
 
         update = """
                     UPDATE %s
-
                     SET MOST_RECENT_IPV6 = '%s'
                     WHERE mac = '%s'
                  """ % (table_name, ip, mac)
@@ -405,7 +403,6 @@ def update_descriptions():
         except:
             print 'Error in DB update: ', cursor._last_executed
             db.rollback()
-
 
     # Close database connection
     db.close()
