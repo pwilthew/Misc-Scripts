@@ -688,8 +688,8 @@ def notice_email(msg):
     server = smtplib.SMTP('localhost',25)
     server.starttls()
 
-    f = 'alerts@netwatch.mivamerchant.net'
-    t = 'pwilthew@miva.com'
+    f = 'myemail@example.com'
+    t = 'youremail@example.com'
 
     container = MIMEMultipart('alternative')
     container['Subject'] = 'Network Alert: %s' % table_name
