@@ -7,9 +7,13 @@ to a switch stack Cisco 2960XR."""
 import MySQLdb
 import subprocess
 import re
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from datetime import *
 
-# Global dictionary of Interface Index ID => [MAC address, VLAN]
-dic_if_mac_vlan = {}
+# Global list of triples [Interface Index ID, MAC address, VLAN]
+list_if_mac_vlan = []
 
 # Global VLAN's IDs list
 VLANS_IDS = []
@@ -22,7 +26,7 @@ IF_DESCRIPTION_OID = '.1.3.6.1.2.1.2.2.1.2'
 VLAN_IF_TABLE_MOD = 'BRIDGE-MIB:CISCO-IF-EXTENSION-MIB:CISCO-VLAN-IFTABLE-RELATIONSHIP-MIB:IF-MIB'
 
 # Open file with database credentials
-file_name = '/db_creds.txt'
+file_name = '/var/www/vhosts/netwatch.mivamerchant.net/private/db_creds.txt'
 file_object = open(file_name,'r')
 creds = [(x.split(': '))[1] for x in (file_object.read()).splitlines()]
 
@@ -58,6 +62,7 @@ phones_vlan, admins_vlan = lines[0:2]
 
 def populate_vlans_ids():
     """Populates a global list of the found VLANs IDs."""
+
     # Arguments to be used in snmpwalk
     arg = ['-m' + VLAN_IF_TABLE_MOD, '-v' + version, '-l' + security,\
            '-u' + user, '-a' + auth_protocol, '-A' + auth_password,\
@@ -77,10 +82,11 @@ def populate_vlans_ids():
 
 
 def retrieve_indexes_macs():
-    """Populates the global dictionary of interface indexes and their\
-    respective MAC addresses and VLANs (dic_if_mac_vlan)."""
+    """Populates the global list of interface indexes and their\
+    respective MAC addresses and VLANs."""
 
     for vlan in VLANS_IDS:
+
         # Arguments to be used in snmpwalk
         arg = ['-m' + 'BRIDGE-MIB' , '-n' + 'vlan-' + vlan,\
                '-v' + version, '-l' + security, '-u' + user,\
@@ -92,7 +98,6 @@ def retrieve_indexes_macs():
                                   stdout=subprocess.PIPE).communicate()[0]
         
         baseport_index_list = output.splitlines()
-
 
         # Arguments to be used in snmpwalk
         arg = ['-m' + 'BRIDGE-MIB' , '-n' + 'vlan-' + vlan,\
@@ -139,11 +144,15 @@ def retrieve_indexes_macs():
             if_index = second.split(': ')[-1]
             dic_baseport_index[baseport] = if_index
 
-        # Populate the global dic_if_mac_vlan dictionary
+        # Populate the global list_if_mac_vlan
         for baseport in dic_baseport_mac.keys():
+            if baseport not in dic_baseport_index:
+                continue
             if_index = dic_baseport_index[baseport]
             mac = dic_baseport_mac[baseport]
-            dic_if_mac_vlan[if_index] = [mac, vlan]
+            list_if_mac_vlan.append([if_index, mac, vlan])
+
+    print '-> Number of found devices:',len(list_if_mac_vlan)
 
     return
 
@@ -151,16 +160,16 @@ def retrieve_indexes_macs():
 def update_indexes_macs_vlans():
     """Updates the interface indexes, mac addresses, and vlan ids
     into the table."""
+
     # Open database connection
     db = MySQLdb.connect(user=username,db=db_name,passwd=password)
 
     # Prepare a cursor object
     cursor = db.cursor()
 
-    # Insert dictionary content in DB
-    for index in dic_if_mac_vlan.keys():
-
-        mac, vlan = (dic_if_mac_vlan[index])[0:2]
+    # Insert list_if_mac_vlan content in table
+    for item in list_if_mac_vlan:
+        index, mac, vlan = item[0:3]
 
         query = """
                    SELECT * FROM %s
@@ -173,31 +182,48 @@ def update_indexes_macs_vlans():
 
         row_exists = cursor.execute(query)
 
-        # If exact instance(device) exists, continue with next
+        dat = datetime.now()
+
+        # If exact row exists, update last_seen column and continue
         if row_exists:
+            update = """
+                        UPDATE %s
+                        SET last_seen = '%s'
+                        WHERE mac = '%s' AND if_index = '%s' AND vlan = '%s'
+                     """ % (table_name,\
+                            dat,\
+                            mac,\
+                            index,\
+                            vlan\
+                           )
+
+            try:
+                cursor.execute(update)
+                db.commit()
+
+            except:
+                print 'Error in table update: ', cursor._last_executed
+                db.rollback()
+
             continue
 
-        # Now let's determine if this is the first time this MAC has
-        # been seen or if this time the MAC is showing up on a VLAN 
-        # that is not in its allowed vlan list
-        detect_suspicious_devices(index, mac, vlan, cursor)
-
-        # In any case, just add new instance to table
-        query = """
-                   INSERT INTO %s (IF_INDEX, MAC, VLAN)
-                   VALUES ('%s', '%s', '%s')
-                """ % (table_name,\
-                       index,\
-                       mac,\
-                       vlan
-                      )
+        # Otherwise, just add new device to table
+        insert = """
+                    INSERT INTO %s (if_index, mac, vlan, is_new, last_seen)
+                    VALUES ('%s', '%s', '%s', 'Y', '%s')
+                 """ % (table_name,\
+                        index,\
+                        mac,\
+                        vlan,\
+                        dat
+                       )
 
         try:
-            cursor.execute(query)
+            cursor.execute(insert)
             db.commit()
 
         except:
-            print 'Error in DB insertion: ', cursor._last_executed
+            print 'Error in table insertion: ', cursor._last_executed
             db.rollback()
 
     # Close database connection
@@ -206,61 +232,12 @@ def update_indexes_macs_vlans():
     return
 
 
-def detect_suspicious_devices(index, mac, vlan, cursor):
-    """Detects suspicious devices and triggers alerts if necessary."""
-
-    # First, determine if this is the first time this MAC has
-    # been seen, otherwise, detect if the MAC is showing up on a VLAN 
-    # that is not in its allowed vlan list
-    query = """
-                SELECT * FROM %s
-                WHERE mac = '%s'
-            """ % (table_name,\
-                   mac)
-
-    row_exists = cursor.execute(query)
-
-    if not row_exists:
-        #Alert
-        print "New MAC appeared on the network"
-
-    else: # If the MAC existed, it might be on more than one VLAN now
-
-        # Check if this device is allowed on this new VLAN
-        query = """
-                    SELECT allowed_vlan_list FROM %s
-                    WHERE mac = '%s'
-                """ % (table_name,\
-                       mac)
-
-        cursor.execute(query)
-        allowed = False
-
-        for results in cursor:
-            for item in results:
-                if vlan in item:
-                    allowed = True
-
-        if not allowed:
-            #Alert
-            print "MAC appears on a VLAN that is not in its allowed VLANs list"
-
-    # Second, determine if the MAC appears on a VLAN known to be for phones
-    # and does not have a prefix that maps to Cisco
-    if vlan in phones_vlan:
-        if "0:e1:6d:ba" not in mac and\
-           "c8:0:84:aa" not in mac and\
-           "2c:3e:cf:87" not in mac and\
-           "6c:fa:89:94" not in mac and\
-           "54:4a:0:37" not in mac:
-            #Alert
-            print "%s is on the phones' VLAN" % mac
-
-    return
-
-
 def update_ipv4_addresses():
     """Populates the ipv4 address column of the table."""
+
+    # First, get ARP entries of devices not routed by switch
+    query_firewall()
+
     # Arguments to be used in snmpwalk
     arg = ['-v' + version, '-l' + security, '-u' + user,\
            '-a' + auth_protocol, '-A' + auth_password,\
@@ -288,25 +265,21 @@ def update_ipv4_addresses():
 
         update = """
                     UPDATE %s
-                    SET MOST_RECENT_IPV4 = '%s'
+                    SET most_recent_ipv4 = '%s'
                     WHERE mac = '%s'
-                 """ % (table_name, ip, mac)
+                 """ % (table_name,\
+                        ip,\
+                        mac)
         try:
             cursor.execute(update)
             db.commit()
 
         except:
-            print 'Error in DB update: ', cursor._last_executed
+            print 'Error in table update: ', cursor._last_executed
             db.rollback()
 
     # Close database connection
     db.close()
-
-    # Get ARP entries of devices not routed by switch
-    query_firewall()
-
-    # Detect which MACs are not in the ARP entry and alert
-    detect_no_ARP_entry()
 
     return
 
@@ -314,6 +287,7 @@ def update_ipv4_addresses():
 def update_ipv6_addresses():
     """NOT USED CURRENTLY; ipv6 is not enabled on switch.
     Populates the ipv6 address column of the table."""
+
     # Arguments to be used in snmpwalk
     arg = ['-v' + version, '-l' + security, '-u' + user,\
            '-a' + auth_protocol, '-A' + auth_password,\
@@ -339,16 +313,18 @@ def update_ipv6_addresses():
 
         update = """
                     UPDATE %s
-                    SET MOST_RECENT_IPV6 = '%s'
+                    SET most_recent_ipv6 = '%s'
                     WHERE mac = '%s'
-                 """ % (table_name, ip, mac)
+                 """ % (table_name,\
+                        ip,\
+                        mac)
 
         try:
             cursor.execute(update)
             db.commit()
 
         except:
-            print 'Error in DB update: ', cursor._last_executed
+            print 'Error in table update: ', cursor._last_executed
             db.rollback()
 
     # Close database connection
@@ -357,8 +333,56 @@ def update_ipv6_addresses():
     return
 
 
+def query_firewall():
+    """Get the ARP entries for the MAC addresses that are routed
+    by the firewall. Because some of the switch devices are being 
+    routed by the firewall instead of the switch, their ARP entries
+    are empty from the perspective of the switch. """
+
+    # Arguments to be used in snmpwalk
+    arg = ['-v' + fversion, '-l' + fsecurity, '-u' + fuser,\
+           '-a' + fauth_protocol, '-A' + fauth_password,\
+           '-x' + fpriv, '-X' + fpriv_password, fhost,\
+           'ipNetToMediaPhysAddress']
+
+    ip_mac = subprocess.Popen(['snmpwalk'] + arg,\
+                                stdout=subprocess.PIPE).communicate()[0]
+
+    ip_mac_list = ip_mac.splitlines()
+
+    # Open database connection
+    db = MySQLdb.connect(user=username,db=db_name,passwd=password)
+
+    # Prepare a cursor object
+    cursor = db.cursor()
+ 
+    for ln in ip_mac_list:
+        left, mac = ln.split(' = STRING: ')[0:2]
+        dot = '.'
+        ip = dot.join(left.split('.')[2:6])
+
+        update = """
+                    UPDATE %s
+                    SET most_recent_ipv4 = '%s'
+                    WHERE mac = '%s'
+                 """ % (table_name,\
+                        ip,\
+                        mac)
+
+        try:
+            cursor.execute(update)
+            db.commit()
+
+        except:
+            print 'Error in table update: ', cursor._last_executed
+            db.rollback()
+
+    return
+
+
 def update_descriptions():
     """Populates the description column of the table."""
+
     # Arguments to be used in snmpwalk
     arg = ['-v' + version, '-l' + security, '-u' + user,\
            '-a' + auth_protocol, '-A' + auth_password,\
@@ -388,20 +412,25 @@ def update_descriptions():
             update = """
                         UPDATE %s
                         SET description = '%s', switch_port = '%s'
-                        WHERE if_index = '%s'
-                     """ % (table_name, descr, port, index)
+                        WHERE if_index = '%s' 
+                     """ % (table_name,\
+                            descr,\
+                            port,\
+                            index)
         else:
             update = """
                         UPDATE %s
                         SET description = '%s'
                         WHERE if_index = '%s'
-                     """ % (table_name, descr, index)
+                     """ % (table_name,\
+                            descr,\
+                            index)
         try:
             cursor.execute(update)
             db.commit()
 
         except:
-            print 'Error in DB update: ', cursor._last_executed
+            print 'Error in table update: ', cursor._last_executed
             db.rollback()
 
     # Close database connection
@@ -412,6 +441,7 @@ def update_descriptions():
 
 def update_last_detection():
     """Populates the most_recent_detection column of the table."""
+
     # Arguments to be used in snmpwalk
     arg = ['-v' + version, '-l' + security, '-u' + user,\
            '-a' + auth_protocol, '-A' + auth_password,\
@@ -432,22 +462,28 @@ def update_last_detection():
     # Parse list's items to get interface index and device's 
     # most recent detection to insert into DB table
     for row in if_date_list:
-        index, epoch = row.split(' = Timeticks: ')[0:2]
+        index, ticks = row.split(' = Timeticks: ')[0:2]
         index = index.split('.')[-1]
-        epoch = (epoch.split(' ')[0])[1:-1]
+        ticks = int((ticks.split(' ')[0])[1:-1])
+        seconds = ticks/100
+        delta = timedelta(seconds=seconds)
+        today = datetime.now()
+        dat = today - delta
 
         update = """
                     UPDATE %s
-                    SET MOST_RECENT_DETECTION = '%s'
-                    WHERE IF_INDEX = '%s'
-                 """ % (table_name, epoch, index)
+                    SET most_recent_detection = '%s'
+                    WHERE if_index = '%s'
+                 """ % (table_name,\
+                        dat,\
+                        index)
 
         try:
             cursor.execute(update)
             db.commit()
 
         except:
-            print 'Error in DB update: ', cursor._last_executed
+            print 'Error in table update: ', cursor._last_executed
             db.rollback()
 
     # Close database connection
@@ -456,8 +492,10 @@ def update_last_detection():
     return
 
 
-def update_staff_names():
-    """Populates the staff_name column of the table."""
+def update_staff_name():
+    """On the new entries of the table, populates the staff_name
+       column."""
+
     # Arguments to be used in snmpwalk
     arg = ['-v' + version, '-l' + security, '-u' + user,\
            '-a' + auth_protocol, '-A' + auth_password,\
@@ -483,16 +521,18 @@ def update_staff_names():
 
         update = """
                     UPDATE %s
-                    SET STAFF_NAME = '%s'
-                    WHERE IF_INDEX = '%s'
-                 """ % (table_name, name, index)
+                    SET staff_name = '%s'
+                    WHERE if_index = '%s' AND is_new = 'Y'
+                 """ % (table_name,\
+                        name,\
+                        index)
 
         try:
             cursor.execute(update)
             db.commit()
 
         except:
-            print 'Error in DB update: ', cursor._last_executed
+            print 'Error in table update: ', cursor._last_executed
             db.rollback()
 
     # Close database connection
@@ -503,6 +543,7 @@ def update_staff_names():
 
 def update_make_model():
     """Populates the make_model column of the table."""
+
     # Arguments to be used in snmpwalk
     arg1 = ['-v' + version, '-m' + 'ENTITY-MIB', '-l' + security,\
            '-u' + user, '-a' + auth_protocol, '-A' + auth_password,\
@@ -549,15 +590,18 @@ def update_make_model():
 
         update = """
                     UPDATE %s
-                    SET MAKE_MODEL = '%s'
-                    WHERE IF_INDEX = '%s'
-                 """ % (table_name, make_model, temp_dic[alias])
+                    SET make_model = '%s'
+                    WHERE if_index = '%s'
+                 """ % (table_name,\
+                        make_model,\
+                        temp_dic[alias]\
+                       )
         try:
             cursor.execute(update)
             db.commit()
 
         except:
-            print 'Error in DB update: ', cursor._last_executed
+            print 'Error in table update: ', cursor._last_executed
             db.rollback()
 
     # Close database connection
@@ -566,89 +610,120 @@ def update_make_model():
     return
 
 
-def detect_no_ARP_entry():
-    """Detects and triggers an alert if a device shows up in the MAC
-       table but not the ARP neighbor table; this would suggest
-       that a device on the network is not talking IPv4/6, which
-       should never be the case."""
-    
+def detect_suspicious_devices():
+    """Detects suspicious devices and triggers alerts if necessary.
+       Suspicious devices might be: new devices, devices that are 
+       on the phones VLAN but are not phones, and devices that do
+       not have an IP address."""
+
     # Open database connection
     db = MySQLdb.connect(user=username,db=db_name,passwd=password)
 
     # Prepare a cursor object
     cursor = db.cursor()
 
+    # Get new devices in table
     query = """
-               SELECT mac, most_recent_ipv4, vlan FROM %s
+                SELECT mac, vlan, most_recent_ipv4 
+                FROM %s
+                WHERE is_new = 'Y'
             """ % (table_name)
 
     cursor.execute(query)
+    
+    for result in cursor:
+        mac = result[0]
+        vlan = result[1]
+        ipv4 = result[2]
+        message = "Device " + mac + " appeared on the network. "
+        print 'New device:', mac
 
-    for results in cursor:
-        lst = list(results)
-        
-        mac = lst[0]
-        ip = lst[1]
-        vlan = lst[2]
-
-        if ip == None and mac != '0:11:32:1b:65:14' and mac != '8:5b:e:5d:cf:d4':
-            #Alert
-            print "The MAC %s is not in the ARP neighbor table" % mac
- 
-    return
-
-
-def query_firewall():
-    """Get the ARP entries for the MAC addresses that are routed
-    by the firewall. Because some of the switch devices are being 
-    routed by the firewall instead of the switch, their ARP entries
-    are empty from the perspective of the switch. """
-
-    # Arguments to be used in snmpwalk
-    arg = ['-v' + fversion, '-l' + fsecurity, '-u' + fuser,\
-           '-a' + fauth_protocol, '-A' + fauth_password,\
-           '-x' + fpriv, '-X' + fpriv_password, fhost,\
-           'ipNetToMediaPhysAddress']
-
-    ip_mac = subprocess.Popen(['snmpwalk'] + arg,\
-                                stdout=subprocess.PIPE).communicate()[0]
-
-    ip_mac_list = ip_mac.splitlines()
-
-    # Open database connection
-    db = MySQLdb.connect(user=username,db=db_name,passwd=password)
-
-    # Prepare a cursor object
-    cursor = db.cursor()
- 
-    for ln in ip_mac_list:
-        left, mac = ln.split(' = STRING: ')[0:2]
-        dot = '.'
-        ip = dot.join(left.split('.')[2:6])
-
-        update = """
-                    UPDATE %s
-                    SET MOST_RECENT_IPV4 = '%s'
+        # Check if this device is allowed on this VLAN
+        query = """
+                    SELECT allowed_vlan_list 
+                    FROM %s
                     WHERE mac = '%s'
-                 """ % (table_name, ip, mac)
+                """ % (table_name, mac)
 
-        try:
-            cursor.execute(update)
-            db.commit()
+        cursor.execute(query)
+        allowed = False
 
-        except:
-            print 'Error in DB update: ', cursor._last_executed
-            db.rollback()
+        for results in cursor:
+            for item in results:
+                if type(item) is list:
+                    if vlan in item:
+                        allowed = True
+
+        if not allowed:
+            message += "Device is on VLAN that is not in its allowed VLANs list. "
+            print 'Device is on VLAN that is not in its allowed VLANs list'
+
+        # Determine if the MAC appears on a VLAN known to be for phones
+        # and does not have a prefix that maps to Cisco
+        if vlan in phones_vlan:
+            if "0:e1:6d:ba" not in mac and\
+               "c8:0:84:aa" not in mac and\
+               "2c:3e:cf:87" not in mac and\
+               "6c:fa:89:94" not in mac and\
+               "54:4a:0:37" not in mac:
+                message += "Device is on the phones VLAN. "
+                print 'Device is on the phones VLAN'
+
+        # If the device does not have an IP address, it may suggest
+        # that a device on the network is not talking IPv4/6, which
+        # should never be the case
+        if ip == None:
+            message += "Device is not in the ARP neighbor table. "
+            print 'MAC address %s is not in the ARP neighbor table' % mac
+
+        notice_email(message)
 
     return
+
+
+def notice_email(msg):
+    """Sends an email alert."""
+
+    # Initialize SMTP server
+    server = smtplib.SMTP('localhost',25)
+    server.starttls()
+
+    f = 'alerts@netwatch.mivamerchant.net'
+    t = 'pwilthew@miva.com'
+
+    container = MIMEMultipart('alternative')
+    container['Subject'] = 'Network Alert: %s' % table_name
+    container['From'] = f
+    container['To'] = t
+
+    extra = "Visit netwatch.mivamerchant.net/phpMyEdit/%s.php and edit the \
+             Allowed VLAN List field for the new device; i.e: '120, 230'\n" % table_name
+    text = msg + extra
+    
+    html = """\
+              <html>
+                <head></head>
+                <body>
+                    <p>%s</p>
+                    <p>Visit <a href="netwatch.mivamerchant.net/phpMyEdit/%s.php">this \
+                    site</a> and edit the Allowed VLAN List field for the new device; \
+                    i.e: '120, 230'\n </p>
+                </body>
+              </html>
+           """ % (msg, table_name)
+
+    part1 = MIMEText(text, 'plain')
+    part2 = MIMEText(html, 'html')
+
+    container.attach(part1)
+    container.attach(part2)
+
+    server.sendmail(f, t, container.as_string())
+    server.quit()
 
 
 def main():
     """Main program."""
-    # The following DROP and CREATE sql commands should be 
-    # commented when the project testing is completed.
-
-    #'''
 
     # Open database connection
     db = MySQLdb.connect(user=username,db=db_name,passwd=password)
@@ -656,67 +731,91 @@ def main():
     # Prepare a cursor object
     cursor = db.cursor()
 
-    drop = """
-              DROP TABLE IF EXISTS %s
-           """ % (table_name)
-
-    print 'Dropping previous %s table...' % (table_name)
-    cursor.execute(drop)
-    db.commit()
-
-
-    create = """
-                CREATE TABLE %s (
-                                 if_index INT(5) NOT NULL,
-                                 mac VARCHAR(50) NOT NULL, 
-                                 vlan VARCHAR(5) NOT NULL,
-                                 staff_name VARCHAR(120),
-                                 switch_port INT(5), 
-                                 make_model VARCHAR(120),
-                                 description VARCHAR(120),
-                                 most_recent_detection VARCHAR(15),
-                                 allowed_vlan_list VARCHAR(120),
-                                 most_recent_ipv4 VARCHAR(50),
-                                 most_recent_ipv6 VARCHAR(50),
-                                 PRIMARY KEY(if_index, mac, vlan)
-                                 )
+    # Query to determine if table_name exists
+    check = """
+               SHOW TABLES LIKE '%s'
             """ % (table_name)
 
-    print 'Creating table %s...' % (table_name)
-    cursor.execute(create)
-    db.commit()
+    # Boolean variable that holds True if a table_name exists
+    table_existed = cursor.execute(check)
+    
+    if not table_existed:
 
-    # Close database connection
-    db.close()
+        # Query to create a new table that will contain all the devices
+        # on the network. It will be called table_name
+        create = """
+                    CREATE TABLE %s   (
+                                      if_index INT(5) NOT NULL,
+                                      mac VARCHAR(50) NOT NULL, 
+                                      vlan VARCHAR(5) NOT NULL,
+                                      staff_name VARCHAR(120),
+                                      switch_port INT(5), 
+                                      make_model VARCHAR(120),
+                                      description VARCHAR(120),
+                                      most_recent_detection TIMESTAMP,
+                                      allowed_vlan_list VARCHAR(120),
+                                      most_recent_ipv4 VARCHAR(50),
+                                      most_recent_ipv6 VARCHAR(50),
+                                      is_new VARCHAR(1),
+                                      last_seen TIMESTAMP,
+                                      PRIMARY KEY(if_index, mac, vlan),
+                                      CONSTRAINT uniq UNIQUE(if_index, mac, vlan)
+                                      )
+                 """ % (table_name)
 
-    #'''
+        print '-> Creating table %s...' % (table_name)
+        cursor.execute(create)
+        db.commit()
 
-    print 'Retrieving VLAN ids...'
+    print '-> Retrieving VLAN ids...'
     populate_vlans_ids()
 
-    print 'Retrieving interface indexes, mac addresses...'
+    print '-> Retrieving interface indexes, mac addresses...'
     retrieve_indexes_macs()
 
-    print 'Updating or inserting interface indexes, mac addresses, and vlans in %s...'\
-    % (table_name)
+    print '-> Updating or inserting interface indexes, mac addresses, and vlans...'
     update_indexes_macs_vlans()
 
-    print 'Adding known ipv4 addresses...'
+    print '-> Adding known ipv4 addresses...'
     update_ipv4_addresses()
 
-    print 'Adding descriptions...'
+    print '-> Adding descriptions...'
     update_descriptions()
 
-    print 'Adding most recent detection dates...'
+    print '-> Adding most recent detection dates...'
     update_last_detection()
 
-    print 'Adding staff names...'
-    update_staff_names()
+    print '-> Adding staff names on new devices only, if found...'
+    update_staff_name()
 
-    print 'Adding make/model...'
+    print '-> Adding make/model...'
     update_make_model()
+
+    # The following function will make queries on table_name 
+    # to detect new and/or suspicius devices on the network
+    print '-> Detecting new and/or suspicious devices...'
+    detect_suspicious_devices()
+    
+    # As all the new and/or suspicious devices were reported, make them
+    # not new to avoid reporting them again on the next run
+
+    # Query to set column is_new to 'N'
+    set_not_new = """
+                     UPDATE %s
+                     SET is_new = 'N'
+                  """ % (table_name)
+
+    try:
+        cursor.execute(set_not_new)
+        db.commit()
+
+    except:
+        print "Error in table update:", cursor._last_executed
+        db.rollback()   
+
+    db.close()
 
 
 if __name__ == '__main__':
     main()
- 
+
