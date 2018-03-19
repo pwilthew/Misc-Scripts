@@ -1,4 +1,4 @@
-# Scripts to obtain information from different hosts
+#Scripts to obtain information from different hosts
 
 * **ssh_into_hosts.py** obtains:     
     - Network Interfaces
@@ -7,5 +7,5 @@
     - Is it a Virtual Machine?
     - Disk Sizes
 
-* **populate_zabbix_hosts.py** obtains the hosts available in Zabbix and their respective IDs.
+* **populate_zabbix_hosts.py** obtains the hosts synchronized with Zabbix and their respective Zabbix IDs.
 
