@@ -1,17 +1,14 @@
-There are two subdirectories in here, *logs/* and *html/*. 
+PCI requirement 11. Implement processes to test
+for the presence of wireless access points and detect and identify all
+authorized and unathorized wireless access points on a quarterly basis.
 
-They should always have the same logs, but *html/* has them in html 
-format and *logs/* in plaintext. 
-
-The script is also in here, *create_rogue_report.py*. 
+The purpose of this script is to obtain the output of daily rogue scans
+from the Wireless Access Controller (WAC) to verify that authorized and 
+unauthorized wireless access points are identified.
 
 This script executes the command "show rogue ap summary ssid extended channel"
 in the WAC. Its output gets saved in plaintext under a file in *logs/* and it is also
 formatted to html and saved under *html/*.
 
-The script is run daily as a cron job in /etc/cron.daily/create_rogue_report.sh 
 
-create_rogue_report.sh only runs the following line to run the script:
-
-`/usr/bin/python2 /root/rogue_report/create_rogue_report.py`
 
