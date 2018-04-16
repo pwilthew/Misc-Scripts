@@ -1,12 +1,20 @@
-#!/usr/bin/env python2
+#!/usr/bin/python3.6
 
 """Populate the zabbix_hosts database table."""
+import logging
+logger = logging.getLogger(__name__)
 
-from pyzabbix import ZabbixAPI
+import config
 
 import json
 
-import MySQLdb
+import pymysql
+
+import sys
+
+from aux_functions import get_db_and_cursor
+
+from pyzabbix import ZabbixAPI
 
 
 
@@ -19,11 +27,14 @@ def main():
     # Zabbix connection
     # Note that the following request will not work if the
     # zabbix server is not expecting traffic from this host
-    file_obj = open('source/zabbix_creds.txt', 'r')
-    username, passwd = file_obj.read().splitlines()
-    zapi = ZabbixAPI(url='https://zabbix.mivamerchant.net',
-                     user=username,
-                     password=passwd)
+    server, user, passw = config.ZABBIX_CREDS
+
+    try:
+        zapi = ZabbixAPI(server=server)
+        zapi.login(user=user, password=passw)
+    except e:
+        logger.error("Could not connect or authenticate to Zabbix server.")
+        return
 
     # Get all monitored hosts from Zabbix
     result1 = zapi.host.get(monitored_hosts=1, output='extend')
@@ -45,8 +56,8 @@ def main():
             cursor.execute(insert)
             db.commit()
 
-        except:
-            print 'Error in table insert:', cursor._last_executed
+        except e:
+            logger.error("%s: %s" % (host_tuple[1], str(e)))
             db.rollback()
 
     return
@@ -55,30 +66,10 @@ def main():
 def valid_host(hostname):
     """Returns True if hostname ends with .com, .net, .local"""
     suffix = hostname[-3:]
-    if "esx-tpa-l3-ucs2" in hostname:
-        return False
-    elif "pwr-l3-tpa-" in hostname:
-        return False
-    elif "Authorize" in hostname:
-        return False
-    elif suffix == "com" or suffix == "net" or suffix == "local":
+    if suffix == "com" or suffix == "net" or suffix == "local":
         return True
     return False
 
 
-def get_db_and_cursor():
-    """Return a database and cursor objects for inventory
-    database."""
-    file_obj = open("/home/inventory/HostsInventory/source/db_creds.txt", "r")
-    username, db_name, password = file_obj.read().splitlines()
-    db = MySQLdb.connect(user=username, db=db_name, passwd=password)
-    cursor = db.cursor()
-
-    return db, cursor
-
-
 if __name__ == '__main__':
     main()
-
-
-
