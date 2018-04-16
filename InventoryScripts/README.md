@@ -1,4 +1,4 @@
-#Scripts to obtain information from different hosts
+# Scripts to obtain information from different hosts
 
 * **ssh_into_hosts.py** obtains:     
     - Network Interfaces
