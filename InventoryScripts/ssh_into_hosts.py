@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/python3.6
 
 """Obtain the following data from each host after
 establishing a remote connection:
@@ -17,12 +17,14 @@ tables:
     - total_cores
     - virtualized
     - disk_size """
+import logging
+logger = logging.getLogger(__name__)
+
+import config
 
 import json
 
-import MySQLdb
-
-import paramiko
+import pymysql
 
 import os
 
@@ -30,13 +32,15 @@ import re
 
 import sys
 
+import subprocess
+
 import threading
 
 import time
 
 from collections import defaultdict
 
-from subprocess import call, check_output
+from aux_functions import get_db_and_cursor
 
 
 
@@ -46,7 +50,6 @@ def get_and_store_info(server, dic):
     from get_info_through_ssh(). Store each item in a
     dictionary after properly parsing it."""
     ipaddr, ram, cores, virtual, disksize = get_info_through_ssh(server)
-
 
     ipaddr = parse_ipaddr(ipaddr)
     ram = parse_ram(ram)
@@ -68,70 +71,31 @@ def get_info_through_ssh(server):
     """Given a server hostname, establish a secure shell
     connection with it, and execute the necessary bash
     commands to return its network interfaces, total ram,
-    total cores, VM or not, and disk sizes.
-    Uses paramiko."""
-    user = "inventory"
+    total cores, VM or not, and disk sizes."""
+    commands = (
+        "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin:/sbin;"
+        "echo '***';"
+        "ip addr;"
+        "echo '***';"
+        "cat /proc/meminfo | grep MemTotal | egrep --color='never' -o '[0-9]+';"
+        "echo '***';"
+        "cat /proc/cpuinfo | grep --color='never' -c processor;"
+        "echo '***';"
+        "cat /proc/cpuinfo | grep --color='never' -c hypervisor;"
+        "echo '***';"
+        "lsblk -lda"
+        )
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    args = ["ssh", "inventory@" + server, commands]
 
-    try:
-        client.connect(server,
-                       username=user,
-                       gss_auth=True,
-                       timeout=10)
+    ret_code, out, err = run_command(args)
 
-    except Exception as e:
-
-        try:
-            return get_info_through_ssh_2(server)
-
-        except:
-            print "%s-> '%s'" % (server, str(e))
-            return "", "", "", "", ""
-
-
-    stdin, stdout, stderr = client.exec_command("export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin:/sbin; ip addr")
-    ipaddr = stdout.read()
-
-    stdin, stdout, stderr = client.exec_command("cat /proc/meminfo | grep MemTotal | egrep --color='never' -o '[0-9]+'")
-    ram = stdout.read()
-
-    stdin, stdout, stderr = client.exec_command("cat /proc/cpuinfo | grep --color='never' -c processor")
-    cores = stdout.read()
-
-    stdin, stdout, stderr = client.exec_command("cat /proc/cpuinfo | grep --color='never' -c hypervisor")
-    virtual = stdout.read()
-
-    stdin, stdout, stderr = client.exec_command("lsblk -lda")
-    disksize = stdout.read()
-
-    client.close()
-
-    return ipaddr, ram, cores, virtual, disksize
-
-
-def get_info_through_ssh_2(server):
-    """Given a server hostname, establish a secure shell
-    connection with it, and execute the necessary bash
-    commands to return its network interfaces, total ram,
-    total cores, VM or not, and disk sizes.
-    Uses subprocess. Back up method when paramiko breaks in
-    get_info_through_ssh()."""
-    comms = ["ssh", "inventory@" + server, 
-             "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin:/sbin;\
-              echo ***; ip addr;\
-              echo ***; cat /proc/meminfo | grep MemTotal | egrep --color='never' -o '[0-9]+';\
-              echo ***; cat /proc/cpuinfo | grep --color='never' -c processor;\
-              echo ***; cat /proc/cpuinfo | grep --color='never' -c hypervisor;\
-              echo ***; lsblk -lda"]
-
-    out = check_output(comms)
-
+    if ret_code:
+        logger.warning("%s: %s" % (server, str(err).strip("\n")))
+        return "", "", "", "", ""
+        
     divided = [x for x in out.split("***") if x]
-
     return divided[0], divided[1], divided[2], divided[3], divided[4]
-
 
 
 def parse_ipaddr(info):
@@ -145,11 +109,11 @@ def parse_ipaddr(info):
 
     for line in str(info).splitlines():
         if re.findall(r'inet\s', line):
-            if 'scope host lo' not in line:     # Discard localhost
+            if 'scope global' in line:  # Only add scope global addresses
                 ipv4_list.append(line.strip())
 
         if re.findall(r'inet6\s', line):
-            if 'scope host' not in line:        # Discard localhost
+            if 'scope global' in line:  # Only add scope global addresses
                 ipv6_list.append(line.strip())
 
     for item in ipv4_list:
@@ -230,7 +194,7 @@ def insert_list_in_table(server, interfaces, db, cursor):
             db.commit()
 
         except:
-            print 'Error in table insert:', cursor._last_executed
+            print("Error in table insert: %s" % cursor._last_executed)
             db.rollback()
 
     return
@@ -246,22 +210,21 @@ def insert_value_in_table(server, table, db, cursor, column, value):
         cursor.execute(insert)
         db.commit()
 
-    except:
-        print 'Error in table insert:', cursor._last_executed
+    except e:
+        logger.error("%s: %s" % (server, str(e)))
         db.rollback()
 
     return
 
 
-def get_db_and_cursor():
-    """Return a database and cursor objects for inventory
-    database."""
-    file_obj = open("/home/inventory/HostsInventory/source/db_creds.txt", "r")
-    username, db_name, password = file_obj.read().splitlines()
-    db = MySQLdb.connect(user=username, db=db_name, passwd=password)
-    cursor = db.cursor()
-
-    return db, cursor
+def run_command(cmd_args):
+    """Wrapper to run a command in subprocess."""
+    proc = subprocess.Popen(cmd_args,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            universal_newlines=True)
+    out, err = proc.communicate()
+    return proc.returncode, out, err
 
     
 def main():
@@ -311,4 +274,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
